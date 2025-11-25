@@ -1,0 +1,91 @@
+import type { User } from '../types';
+import { generateAvatar } from './geminiService';
+
+const USERS_KEY = 'nutriai_users';
+const CURRENT_USER_KEY = 'nutriai_current_user';
+
+// Simple in-memory hash for demonstration. In a real app, use a library like bcrypt.
+const simpleHash = (password: string): string => {
+    let hash = 0;
+    for (let i = 0; i < password.length; i++) {
+        const char = password.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString();
+};
+
+
+const getUsers = (): User[] => {
+    const usersJson = localStorage.getItem(USERS_KEY);
+    return usersJson ? JSON.parse(usersJson) : [];
+};
+
+const saveUsers = (users: User[]) => {
+    localStorage.setItem(USERS_KEY, JSON.stringify(users));
+};
+
+export const authService = {
+    async signup(username: string, password: string): Promise<User | null> {
+        const users = getUsers();
+        if (users.some(user => user.username.toLowerCase() === username.toLowerCase())) {
+            throw new Error("Username already exists.");
+        }
+        
+        const passwordHash = simpleHash(password);
+        
+        let avatar: string | undefined;
+        try {
+            avatar = await generateAvatar(username);
+        } catch (error) {
+            console.warn("Avatar generation failed during signup, proceeding with default.", error);
+            // Proceed without avatar, UI will show default icon
+            avatar = undefined;
+        }
+        
+        const newUser: User = {
+            id: Date.now(),
+            username,
+            passwordHash,
+            avatar,
+        };
+
+        saveUsers([...users, newUser]);
+        return newUser;
+    },
+
+    async login(username: string, password: string): Promise<User | null> {
+        const users = getUsers();
+        const passwordHash = simpleHash(password);
+        const user = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.passwordHash === passwordHash);
+
+        if (user && !user.avatar) {
+            try {
+                const avatar = await generateAvatar(user.username);
+                user.avatar = avatar;
+                const userIndex = users.findIndex(u => u.id === user.id);
+                if (userIndex !== -1) {
+                    users[userIndex] = user;
+                    saveUsers(users);
+                }
+            } catch (e) {
+                console.error("Could not generate avatar on login, continuing without it.", e);
+            }
+        }
+        
+        return user || null;
+    },
+    
+    setCurrentUser(user: User) {
+        localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+    },
+
+    getCurrentUser(): User | null {
+        const userJson = localStorage.getItem(CURRENT_USER_KEY);
+        return userJson ? JSON.parse(userJson) : null;
+    },
+
+    clearCurrentUser() {
+        localStorage.removeItem(CURRENT_USER_KEY);
+    }
+};
